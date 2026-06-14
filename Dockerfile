@@ -4,9 +4,8 @@ FROM python:3.9-slim-bullseye
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     build-essential \
-    gcc \
-    g++ \
-    python3-dev \
+    libasound2-dev \
+    libopus-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
