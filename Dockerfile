@@ -1,4 +1,4 @@
-FROM python:3.10-slim-buster
+FROM python:3.10-slim-bullseye
 
 # တကယ့် Linux စနစ်ထဲသို့ လိုအပ်သော Build Tools များနှင့် ffmpeg သွင်းခြင်း
 RUN apt-get update && apt-get install -y \
