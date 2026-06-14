@@ -1,4 +1,4 @@
-FROM python:3.10-slim-bullseye
+FROM python:3.9-slim-bullseye
 
 # တကယ့် Linux စနစ်ထဲသို့ လိုအပ်သော Build Tools များနှင့် ffmpeg သွင်းခြင်း
 RUN apt-get update && apt-get install -y \
@@ -14,6 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # No-cache ဖြင့် သန့်သန့်ရှင်းရှင်း သွင်းမည်
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
