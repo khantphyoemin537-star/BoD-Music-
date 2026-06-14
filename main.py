@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pytgcalls import pytgcalls
+from pytgcalls import PyTgCalls
 from pytgcalls.types import AudioPiped
 from yt_dlp import YoutubeDL
 from motor.motor_asyncio import AsyncIOMotorClient
