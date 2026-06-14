@@ -1,5 +1,5 @@
 pyrogram==2.0.106
-pytgcalls==1.0.0
+py-tgcalls
 tgcrypto
 yt-dlp
 motor
