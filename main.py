@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pytgcalls import PyTgCalls
 from pytgcalls.types import AudioPiped
@@ -12,13 +12,14 @@ from motor.motor_asyncio import AsyncIOMotorClient
 logging.basicConfig(level=logging.INFO)
 
 # ==========================================
-# ⚙️ CONFIGURATION & DATABASE SETUP
+# ⚙️ CONFIGURATION & DATABASE SETUP (SECURED)
 # ==========================================
-API_ID = 39584681
-API_HASH = 'c8c0685d6dd5b9e546093ea90d27733b'
-BOT_TOKEN = '8851389371:AAGtL5vzAfnOsDqU_3Z6hSqmad75xngwfAo'
-MONGO_URI = "mongodb+srv://kkt:944PJsFRda4Tcr3C@cluster0.kb5fzfl.mongodb.net/telegram_bot?appName=Cluster0&tlsAllowInvalidCertificates=true"
-OWNER_ID = 6015356597 # มင်းရဲ့ Owner Telegram ID
+# စိတ်ချရအောင် Render Environment Variables ကနေပဲ လှမ်းဖတ်ပါမယ်
+API_ID = int(os.environ.get("API_ID", 39584681))
+API_HASH = os.environ.get("API_HASH", "c8c0685d6dd5b9e546093ea90d27733b")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8851389371:AAGtL5vzAfnOsDqU_3Z6hSqmad75xngwfAo")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://kkt:944PJsFRda4Tcr3C@cluster0.kb5fzfl.mongodb.net/telegram_bot?appName=Cluster0&tlsAllowInvalidCertificates=true")
+OWNER_ID = int(os.environ.get("OWNER_ID", 6015356597)) 
 
 # MongoDB Connection
 db_client = AsyncIOMotorClient(MONGO_URI)
@@ -37,10 +38,8 @@ call_py = None
 # 🌍 DYNAMIC USERBOT LIFECYCLE MANAGEMENT
 # ==========================================
 async def start_userbot_session(session_string):
-    """ Restart or Start Userbot dynamically without restarting Render """
     global userbot, call_py
     try:
-        # Existing session ရှိရင် အရင်ပိတ်မယ်
         if call_py:
             try: await call_py.stop()
             except: pass
@@ -52,6 +51,31 @@ async def start_userbot_session(session_string):
         userbot = Client("bod_vc_userbot", api_id=API_ID, api_hash=API_HASH, session_string=session_string)
         call_py = PyTgCalls(userbot)
         
+        # Auto-Play handler ကို ဤနေရာတွင် ချိတ်ဆက်ပေးရပါမယ် (v1 syntax)
+        @call_py.on_stream_end()
+        async def stream_end_handler(client, update):
+            chat_id = update.chat_id
+            if chat_id in QUEUE and len(QUEUE[chat_id]) > 1:
+                QUEUE[chat_id].pop(0) # ပြီးသွားတဲ့ သီချင်းကို ဖယ်မယ်
+                next_song = QUEUE[chat_id][0]
+                try:
+                    await call_py.change_stream(chat_id, AudioPiped(next_song["url"]))
+                    await bot.send_message(
+                        chat_id,
+                        f"⏭ **𝗔𝗨𝗧𝗢-𝗣𝗟𝗔𝗬: 𝗡𝗘𝗫𝗧 𝗧𝗥𝗔𝗖𝗞**\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📝 **𝗧𝗶𝘁𝗹𝗲:** `{next_song['title']}`\n"
+                        f"━━━━━━━━━━━━━━━━━━━━",
+                        reply_markup=get_control_buttons()
+                    )
+                except Exception as e:
+                    print(f"Error in auto-play: {e}")
+            else:
+                # Queue ထဲ သီချင်းမရှိတော့ရင် VC ကနေ ထွက်မယ်
+                QUEUE[chat_id] = []
+                try: await call_py.leave_group_call(chat_id)
+                except: pass
+
         await userbot.start()
         await call_py.start()
         print("🚀 [BOD SYSTEM] Userbot Client is now fully ONLINE!")
@@ -107,7 +131,7 @@ def get_control_buttons():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("‖ ⏸ 𝗣𝗔𝗨𝗦𝗘 ‖", callback_data="cb_pause"),
-            InlineKeyboardButton("‖ ▶️ 𝗥𝗘𝗦𝗨𝗠𝗘 ‖", callback_data="cb_resume")
+            InlineKeyboardButton("‖ ▶️ 替代 ‖", callback_data="cb_resume") # Resume အတွက် စာသားပြင်ဆင်နိုင်သည်
         ],
         [
             InlineKeyboardButton("‖ ⏭ 𝗦𝗞𝗜𝗣 ‖", callback_data="cb_skip"),
@@ -139,7 +163,6 @@ async def update_session_command(client, message):
     session_str = message.reply_to_message.text.strip()
     status_msg = await message.reply_text("⚡ **𝐁𝐎𝐃 𝐃𝐀𝐓𝐀𝐁𝐀𝐒𝐄:** `Updating string session...`")
 
-    # MongoDB ထဲ သိမ်းဆည်းခြင်း
     await music_col.update_one(
         {"key": "string_session"},
         {"$set": {"value": session_str}},
@@ -148,7 +171,6 @@ async def update_session_command(client, message):
 
     await status_msg.edit("🔄 **𝐁𝐎𝐃 𝐒𝐘𝐒𝐓𝐄𝐌:** `Hot-rebooting stream engine...`")
     
-    # Run-time ထဲမှာတင် Userbot ကို ချက်ချင်း အလုပ်လုပ်အောင် Engine နှိုးပေးခြင်း
     success = await start_userbot_session(session_str)
     
     if success:
@@ -164,7 +186,6 @@ async def update_session_command(client, message):
 # ==========================================
 # 🤖 BOT COMMAND HANDLERS (GROUP COMMANDS)
 # ==========================================
-
 @bot.on_message(filters.command("play", prefixes=["/", "!"]) & filters.group)
 async def play_command(client, message):
     global QUEUE
@@ -199,7 +220,7 @@ async def play_command(client, message):
                 chat_id,
                 f"🔥 **𝗡𝗢𝗪 𝗣𝗟𝗔𝗬𝗜𝗡𝗚 𝗢𝗡 𝗩𝗖** 🔥\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"📝 **𝗧𝗶𝘁𝗹𝗲:** `{title}`\n"
+                f"😎 **𝗧𝗶𝘁𝗹𝗲:** `{title}`\n"
                 f"🎧 **𝗦𝘁𝗮𝘁𝘂𝘀:** `Streaming Live`\n"
                 f"━━━━━━━━━━━━━━━━━━━━\n"
                 f"> **Community:** `Brotherhood of Dexter`",
@@ -211,8 +232,8 @@ async def play_command(client, message):
     else:
         await status_msg.edit(
             f"➕ **𝗧𝗥𝗔𝗖𝗞 𝗤𝗨𝗘𝗨𝗘𝗗**\n\n"
-            f"📝 **𝗧𝗶𝘁𝗹ε:** `{title}`\n"
-            f"🔢 **𝗣𝗼𝘀𝗶𝘁𝗶𝗼𝗻:** `#{len(QUEUE[chat_id])}`"
+            f" **𝗧𝗶𝘁𝗹ε:** `{title}`\n"
+            f"**𝗣𝗼𝘀𝗶𝘁𝗶𝗼𝗻:** `#{len(QUEUE[chat_id])}`"
         )
 
 @bot.on_message(filters.command("skip", prefixes=["/", "!"]) & filters.group)
@@ -230,14 +251,14 @@ async def skip_command(client, message):
         
         await call_py.change_stream(chat_id, AudioPiped(next_song["url"]))
         await message.reply_text(
-            f"⏭ **𝗦𝗞𝗜𝗣𝗣𝗘𝗗 & 𝗡𝗘𝗫𝗧 𝗨𝗣**\n"
+            f"⏭ **𝗦𝗞𝗜𝗣??𝗘𝗗 & 𝗡𝗘𝗫𝗧 𝗨𝗣**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📝 **𝗧𝗶𝘁𝗹𝗲:** `{next_song['title']}`\n"
             f"━━━━━━━━━━━━━━━━━━━━",
             reply_markup=get_control_buttons()
         )
     except Exception as e:
-        await message.reply_text(f"❌ **𝗦𝗞𝗜𝗣 𝗘𝗥𝗥𝗢𝗥:** `{e}`")
+        await message.reply_text(f"❌ **𝗦𝗞𝗜𝗣 𝗘Rules𝗥𝗢𝗥:** `{e}`")
 
 @bot.on_message(filters.command(["end", "stop"], prefixes=["/", "!"]) & filters.group)
 async def end_command(client, message):
@@ -316,7 +337,6 @@ async def callback_handler(client, callback_query: CallbackQuery):
 
     elif data == "cb_close":
         try:
-            # Control panel မက်ဆေ့ချ်ကို ရှင်းထုတ်ဖျက်ဆီးပစ်မယ်
             await callback_query.message.delete()
         except Exception:
             await callback_query.answer("❌ Failed to close panel", show_alert=True)
@@ -335,15 +355,16 @@ async def main():
     
     if session_doc:
         STRING_SESSION = session_doc.get("value")
-        # Userbot အား စတင်နှိုးခြင်း
         await start_userbot_session(STRING_SESSION)
     else:
         print("💡 [BOD SYSTEM] Database contains no string session yet. Waiting for Owner via DM...")
 
-    # Official Bot ကို စတင်ဖွင့်လှစ်ခြင်း
+    # Official Bot ကို စတင်ဖွင့်လှစ်ပြီး စနစ်တစ်ခုလုံးကို စောင့်ကြည့်ထိန်းသိမ်းခြင်း
     await bot.start()
     print("🚀 BOD Music System is fully deployed and blasting live!")
-    await asyncio.Event().wait()
+    await idle() # asyncio.Event().wait() အစား pyrogram.idle() သုံးခြင်းက signal များကို ပိုကောင်းမွန်စွာ ကိုင်တွယ်နိုင်စေသည်
+    await bot.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
