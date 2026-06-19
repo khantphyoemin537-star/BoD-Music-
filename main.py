@@ -1,6 +1,9 @@
 import os
 import asyncio
 import logging
+import shutil
+import urllib.request
+import tarfile
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pytgcalls import PyTgCalls
@@ -8,31 +11,66 @@ from pytgcalls.types import AudioPiped
 from yt_dlp import YoutubeDL
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Setup Logging
+# Setup System Matrix Logging
 logging.basicConfig(level=logging.INFO)
 
-# ==========================================
-# ⚙️ CONFIGURATION & DATABASE SETUP (SECURED)
-# ==========================================
-# စိတ်ချရအောင် Render Environment Variables ကနေပဲ လှမ်းဖတ်ပါမယ်
-API_ID = int(os.environ.get("API_ID", 39584681))
-API_HASH = os.environ.get("API_HASH", "c8c0685d6dd5b9e546093ea90d27733b")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8851389371:AAGtL5vzAfnOsDqU_3Z6hSqmad75xngwfAo")
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb+srv://kkt:944PJsFRda4Tcr3C@cluster0.kb5fzfl.mongodb.net/telegram_bot?appName=Cluster0&tlsAllowInvalidCertificates=true")
-OWNER_ID = int(os.environ.get("OWNER_ID", 6015356597)) 
+# ====================================================================================
+# ⚙️ CONFIGURATION & DATABASE SETUP (HARDCODED VALUES)
+# ====================================================================================
+# Credentials အားလုံးကို ကုဒ်ထဲမှာ တိုက်ရိုက် အသေထည့်သွင်းထားပါသည်
+API_ID = 39584681
+API_HASH = "c8c0685d6dd5b9e546093ea90d27733b"
+BOT_TOKEN = "8851389371:AAGtL5vzAfnOsDqU_3Z6hSqmad75xngwfAo"
+MONGO_URI = "mongodb+srv://kkt:944PJsFRda4Tcr3C@cluster0.kb5fzfl.mongodb.net/telegram_bot?appName=Cluster0&tlsAllowInvalidCertificates=true"
+OWNER_ID = 6015356597
 
-# MongoDB Connection
+# MongoDB Connection Bridge
 db_client = AsyncIOMotorClient(MONGO_URI)
 db = db_client["telegram_bot"]
 music_col = db["bod_music_settings"]
 
-# Global Music Queue
+# Global Music Queue Matrix
 QUEUE = {}
 
-# Initialize Clients
+# Initialize Native Clients
 bot = Client("bod_official_music_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 userbot = None
 call_py = None
+
+# ==========================================
+# 📦 DYNAMIC FFMPEG DEPLOYER FOR RENDER
+# ==========================================
+def ensure_ffmpeg_deployed():
+    """Ensures FFmpeg binaries are dynamically provisioned in virtual environments like Render"""
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        print("✅ [BOD ENVIRONMENT] Native FFmpeg architecture detected in system PATH.")
+        return
+
+    print("📥 [BOD ENVIRONMENT] FFmpeg missing! Downloading static Linux binaries for Render instance...")
+    bin_dir = os.path.join(os.getcwd(), "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    
+    ffmpeg_target = os.path.join(bin_dir, "ffmpeg")
+    if not os.path.exists(ffmpeg_target):
+        static_url = "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        archive_path = os.path.join(bin_dir, "ffmpeg.tar.xz")
+        try:
+            urllib.request.urlretrieve(static_url, archive_path)
+            with tarfile.open(archive_path, "r:xz") as tar:
+                for member in tar.getmembers():
+                    if member.name.endswith("ffmpeg") or member.name.endswith("ffprobe"):
+                        member.name = os.path.basename(member.name)
+                        tar.extract(member, bin_dir)
+            os.remove(archive_path)
+            os.chmod(os.path.join(bin_dir, "ffmpeg"), 0o755)
+            os.chmod(os.path.join(bin_dir, "ffprobe"), 0o755)
+            print("✅ [BOD ENVIRONMENT] Static Linux FFmpeg compiled and extracted successfully.")
+        except Exception as e:
+            print(f"❌ [BOD ENVIRONMENT] Failed to hot-deploy static FFmpeg dependencies: {e}")
+            return
+            
+    os.environ["PATH"] += os.pathsep + bin_dir
+    print(f"🚀 [BOD ENVIRONMENT] Dynamic binary execution path set to: {bin_dir}")
 
 # ==========================================
 # 🌍 DYNAMIC USERBOT LIFECYCLE MANAGEMENT
@@ -51,12 +89,11 @@ async def start_userbot_session(session_string):
         userbot = Client("bod_vc_userbot", api_id=API_ID, api_hash=API_HASH, session_string=session_string)
         call_py = PyTgCalls(userbot)
         
-        # Auto-Play handler ကို ဤနေရာတွင် ချိတ်ဆက်ပေးရပါမယ် (v1 syntax)
         @call_py.on_stream_end()
         async def stream_end_handler(client, update):
             chat_id = update.chat_id
             if chat_id in QUEUE and len(QUEUE[chat_id]) > 1:
-                QUEUE[chat_id].pop(0) # ပြီးသွားတဲ့ သီချင်းကို ဖယ်မယ်
+                QUEUE[chat_id].pop(0)
                 next_song = QUEUE[chat_id][0]
                 try:
                     await call_py.change_stream(chat_id, AudioPiped(next_song["url"]))
@@ -71,7 +108,6 @@ async def start_userbot_session(session_string):
                 except Exception as e:
                     print(f"Error in auto-play: {e}")
             else:
-                # Queue ထဲ သီချင်းမရှိတော့ရင် VC ကနေ ထွက်မယ်
                 QUEUE[chat_id] = []
                 try: await call_py.leave_group_call(chat_id)
                 except: pass
@@ -104,15 +140,18 @@ async def start_dummy_web_server():
     except Exception as e:
         print(f"❌ Failed to start Dummy Web Server: {e}")
 
-# ==========================================
-# 🎵 YOUTUBE SEARCH & STREAM EXTRACTOR
-# ==========================================
+# ====================================================================================
+# 🎵 YOUTUBE SEARCH, STREAM & MP3 DOWNLOAD CORE ARCHITECTURE
+# ====================================================================================
 def get_youtube_stream(query):
+    """VC Link Exporter Engine"""
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
-        'skip_download': True
+        'skip_download': True,
+        'geo_bypass': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     with YoutubeDL(ydl_opts) as ydl:
         try:
@@ -124,6 +163,35 @@ def get_youtube_stream(query):
             return None, None
     return None, None
 
+def download_mp3_file(query):
+    """Direct MP3 Compiler Engine"""
+    if not os.path.exists("downloads"):
+        os.makedirs("downloads")
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'geo_bypass': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    with YoutubeDL(ydl_opts) as ydl:
+        try:
+            info = ydl.extract_info(f"ytsearch:{query}", download=True)
+            if 'entries' in info and len(info['entries']) > 0:
+                video = info['entries'][0]
+                filename = ydl.prepare_filename(video)
+                base, _ = os.path.splitext(filename)
+                return f"{base}.mp3", video.get('title', 'Audio Track')
+        except Exception:
+            return None, None
+    return None, None
+
 # ==========================================
 # 🎛️ INLINE CONTROL BUTTONS GENERATOR
 # ==========================================
@@ -131,7 +199,7 @@ def get_control_buttons():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("‖ ⏸ 𝗣𝗔𝗨𝗦𝗘 ‖", callback_data="cb_pause"),
-            InlineKeyboardButton("‖ ▶️ 替代 ‖", callback_data="cb_resume") # Resume အတွက် စာသားပြင်ဆင်နိုင်သည်
+            InlineKeyboardButton("‖ ▶️ 𝗥𝗘𝗦𝗨𝗠𝗘 ‖", callback_data="cb_resume")
         ],
         [
             InlineKeyboardButton("‖ ⏭ 𝗦𝗞𝗜𝗣 ‖", callback_data="cb_skip"),
@@ -161,7 +229,7 @@ async def update_session_command(client, message):
         return
 
     session_str = message.reply_to_message.text.strip()
-    status_msg = await message.reply_text("⚡ **𝐁𝐎𝐃 𝐃𝐀𝐓𝐀𝐁𝐀𝐒𝐄:** `Updating string session...`")
+    status_msg = await message.reply_text("⚡ **𝗕𝗢𝗗 𝗗𝗔𝗧𝗔𝗕𝗔𝗦𝗘:** `Updating string session...`")
 
     await music_col.update_one(
         {"key": "string_session"},
@@ -169,8 +237,7 @@ async def update_session_command(client, message):
         upsert=True
     )
 
-    await status_msg.edit("🔄 **𝐁𝐎𝐃 𝐒𝐘𝐒𝐓𝐄𝐌:** `Hot-rebooting stream engine...`")
-    
+    await status_msg.edit("🔄 **𝗕𝗢𝗗 𝗦𝗬𝗦𝗧𝗘𝐌:** `Hot-rebooting stream engine...`")
     success = await start_userbot_session(session_str)
     
     if success:
@@ -178,16 +245,18 @@ async def update_session_command(client, message):
             "🔮 **𝗦𝗘𝗦𝗦𝗜𝗢𝗡 𝗨𝗣𝗗𝗔𝗧𝗘𝗗 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟𝗟𝗬**\n\n"
             "» **Status:** `ONLINE` 🎧\n"
             "» **Engine:** `PyTgCalls Native Stream`\n\n"
-            "_" + "Everything is set. Go stream the world, Owner." + "_"
+            "_Everything is set. Go stream the world, Owner._"
         )
     else:
         await status_msg.edit("❌ **𝐄𝐍𝐆𝐈𝐍𝐄 𝐂𝐑𝐀𝐒𝐇:** Session string is invalid or rejected by Telegram API.")
 
-# ==========================================
-# 🤖 BOT COMMAND HANDLERS (GROUP COMMANDS)
-# ==========================================
-@bot.on_message(filters.command("play", prefixes=["/", "!"]) & filters.group)
-async def play_command(client, message):
+# ====================================================================================
+# 🤖 BOT COMMAND INTERCEPTORS (THE TWO DISTINCT GATEWAYS)
+# ====================================================================================
+
+# 🛣️ GATEWAY 1: VOICE CHAT STREAM ENGINE (Requires Prefix: /play, !play, /music, etc.)
+@bot.on_message(filters.command(["play", "music", "song", "search"], prefixes=["/", "!"]) & filters.group)
+async def vc_play_handler(client, message):
     global QUEUE
     chat_id = message.chat.id
 
@@ -200,9 +269,10 @@ async def play_command(client, message):
         return
 
     query = " ".join(message.command[1:])
-    status_msg = await message.reply_text("🔍 **𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚:** `Fetching audio vibes from YouTube...`")
+    status_msg = await message.reply_text("🔍 **𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 FOR VC:** `Connecting to YouTube stream grid...`")
 
-    stream_url, title = get_youtube_stream(query)
+    loop = asyncio.get_event_loop()
+    stream_url, title = await loop.run_in_executor(None, get_youtube_stream, query)
     if not stream_url:
         await status_msg.edit("❌ **𝟰𝟬𝟰 𝗡𝗢𝗧 𝗙𝗢𝗨𝗡𝗗:** Could not locate the requested track on YouTube.")
         return
@@ -228,14 +298,48 @@ async def play_command(client, message):
             )
         except Exception as e:
             QUEUE[chat_id].pop(0)
-            await status_msg.edit(f"❌ **𝐒𝐓𝐑𝐄𝐀𝐌 𝐄𝐑𝐑𝐎𝐑:** Make sure Userbot account is inside this group VC.\n`Details: {e}`")
+            await status_msg.edit(f"❌ **𝐒𝐓𝐑𝐄𝐀𝐌 𝐄𝐑𝐑𝐎𝐑:** Make sure the Userbot account is a member inside this group VC.\n`Details: {e}`")
     else:
         await status_msg.edit(
             f"➕ **𝗧𝗥𝗔𝗖𝗞 𝗤𝗨𝗘𝗨𝗘𝗗**\n\n"
-            f" **𝗧𝗶𝘁𝗹ε:** `{title}`\n"
-            f"**𝗣𝗼𝘀𝗶𝘁𝗶𝗼𝗻:** `#{len(QUEUE[chat_id])}`"
+            f"» **Title:** `{title}`\n"
+            f"» **Position:** `#{len(QUEUE[chat_id])}`"
         )
 
+
+# 🛣️ GATEWAY 2: DIRECT MP3 FILE DELIVERY ENGINE (Strictly No Prefix: play alone, music faded, etc.)
+@bot.on_message(filters.regex(r"^(?i)^(play|music|song)\s+(.+)$") & filters.group)
+async def mp3_delivery_handler(client, message):
+    chat_id = message.chat.id
+    query = message.matches[0].group(2).strip()
+    
+    status_msg = await message.reply_text("📥 **𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 𝗠𝗣𝟯:** `Extracting high-quality audio matrix...`")
+    
+    loop = asyncio.get_event_loop()
+    mp3_path, title = await loop.run_in_executor(None, download_mp3_file, query)
+    
+    if not mp3_path or not os.path.exists(mp3_path):
+        await status_msg.edit("❌ **DOWNLOAD ERROR:** Failed to extract MP3 track from YouTube database.")
+        return
+        
+    try:
+        await status_msg.edit("⚡ **𝗨block𝗣𝗟𝗢𝗔𝗗𝗜𝗡𝗚:** `Dispatching MP3 file packet to chat group...`")
+        await client.send_audio(
+            chat_id=chat_id,
+            audio=mp3_path,
+            caption=f"🎵 **𝗠𝗨𝗦𝗜𝗖 𝗗𝗘𝗟𝗜𝗩𝗘𝗥𝗬 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟**\n\n» **Track:** `{title}`\n» **Type:** `Direct MP3 Export`\n» **Powered by:** `BOD Music Engine`"
+        )
+        await status_msg.delete()
+    except Exception as e:
+        await status_msg.edit(f"❌ **DISPATCH ERROR:** `{e}`")
+    finally:
+        if mp3_path and os.path.exists(mp3_path):
+            os.remove(mp3_path)
+
+
+# ==========================================
+# 🎛️ CONTROLS & UTILITIES HANDLERS
+# ==========================================
 @bot.on_message(filters.command("skip", prefixes=["/", "!"]) & filters.group)
 async def skip_command(client, message):
     global QUEUE
@@ -251,14 +355,14 @@ async def skip_command(client, message):
         
         await call_py.change_stream(chat_id, AudioPiped(next_song["url"]))
         await message.reply_text(
-            f"⏭ **𝗦𝗞𝗜𝗣??𝗘𝗗 & 𝗡𝗘𝗫𝗧 𝗨𝗣**\n"
+            f"⏭ **𝗦𝗞𝗜𝗣𝗣𝗘𝗗 & 𝗡𝗘𝗫𝗧 𝗨𝗣**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📝 **𝗧𝗶𝘁𝗹𝗲:** `{next_song['title']}`\n"
             f"━━━━━━━━━━━━━━━━━━━━",
             reply_markup=get_control_buttons()
         )
     except Exception as e:
-        await message.reply_text(f"❌ **𝗦𝗞𝗜𝗣 𝗘Rules𝗥𝗢𝗥:** `{e}`")
+        await message.reply_text(f"❌ **𝗦𝗞𝗜𝗣 𝗘𝗥𝗥𝗢𝗥:** `{e}`")
 
 @bot.on_message(filters.command(["end", "stop"], prefixes=["/", "!"]) & filters.group)
 async def end_command(client, message):
@@ -286,9 +390,6 @@ async def queue_command(client, message):
         text += f"**{i} .** `{song['title']}`\n"
     await message.reply_text(text)
 
-# ==========================================
-# 🎛️ CALLBACK QUERY HANDLER (CONTROL PANEL)
-# ==========================================
 @bot.on_callback_query(filters.regex(r"^cb_"))
 async def callback_handler(client, callback_query: CallbackQuery):
     chat_id = callback_query.message.chat.id
@@ -345,24 +446,21 @@ async def callback_handler(client, callback_query: CallbackQuery):
 # 🚀 MAIN RUNNER (STARTUP LOGIC)
 # ==========================================
 async def main():
-    print("⏳ Starting BOD Music Core...")
+    print("⏳ Starting BOD Music Core Matrix...")
     
-    # Web server background task
+    ensure_ffmpeg_deployed()
     asyncio.create_task(start_dummy_web_server())
 
-    # Database ထဲမှာ session အဟောင်းရှိမရှိ စစ်မယ်
     session_doc = await music_col.find_one({"key": "string_session"})
-    
     if session_doc:
         STRING_SESSION = session_doc.get("value")
         await start_userbot_session(STRING_SESSION)
     else:
         print("💡 [BOD SYSTEM] Database contains no string session yet. Waiting for Owner via DM...")
 
-    # Official Bot ကို စတင်ဖွင့်လှစ်ပြီး စနစ်တစ်ခုလုံးကို စောင့်ကြည့်ထိန်းသိမ်းခြင်း
     await bot.start()
     print("🚀 BOD Music System is fully deployed and blasting live!")
-    await idle() # asyncio.Event().wait() အစား pyrogram.idle() သုံးခြင်းက signal များကို ပိုကောင်းမွန်စွာ ကိုင်တွယ်နိုင်စေသည်
+    await idle()
     await bot.stop()
 
 if __name__ == "__main__":
